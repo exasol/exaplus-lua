@@ -1,0 +1,20 @@
+#!/usr/bin/expect -f
+set timeout 10
+set exa "[file normalize [file join [file dirname [info script]] .. exaplus]]"
+set env(EXAPLUS_KNOWN_HOSTS) "/tmp/exaplus_known_hosts_expect"
+set env(EXAPLUS_HISTORY) "/tmp/exaplus_history_expect"
+
+spawn $exa -u sys -P exasol -c localhost/nocertcheck:8563
+expect {
+  -re "SQL_EXA>" {}
+  timeout { exit 1 }
+}
+
+send "select 1;\r"
+expect {
+  -re "1 row in resultset" {}
+  timeout { exit 1 }
+}
+
+send "exit\r"
+expect eof

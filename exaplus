@@ -1,0 +1,858 @@
+#!/usr/bin/env lua
+
+local root = debug.getinfo(1, 'S').source:match('@(.*/)') or './'
+package.path = root .. 'lib/?.lua;' .. root .. 'lib/?/init.lua;' ..
+               root .. 'vendor/lua/5.1/?.lua;' .. root .. 'vendor/lua/5.1/?/init.lua;' ..
+               root .. 'vendor/lua/5.1/?/?.lua;' .. package.path
+package.cpath = root .. 'vendor/lua/5.1/?.so;' .. root .. 'vendor/lua/5.1/?/?.so;' .. package.cpath
+
+local json = require('json')
+local rsa = require('rsa')
+local websocket = require('websocket')
+local util = require('util')
+local lineedit = require('lineedit')
+
+local VERSION = 'EXAplusLua 0.1'
+
+local function stdin_is_tty()
+  local rc = os.execute('test -t 0 2>/dev/null')
+  if type(rc) == 'number' then
+    return rc == 0
+  end
+  if type(rc) == 'boolean' then
+    return rc
+  end
+  return false
+end
+
+local function write_error(err)
+  local msg = tostring(err or '')
+  if msg == '' then return end
+  if not msg:match('^Error:') then
+    msg = 'Error: ' .. msg
+  end
+  io.stderr:write(msg .. '\n')
+end
+
+local function print_help()
+  io.write([[EXAplusLua (minimal)
+Synopsis:
+    exaplus [-f <sql file>] [-c <connection string>] [-u <user>] [-p <passwd>] <options>
+
+Help options:
+    -help                           Print overview about the command line parameters
+    -version                        Print version info
+
+Connection options:
+    -c <connection string>          Connection string (default port 8563). Examples: localhost/<fingerprint>[:8563], localhost/nocertcheck[:8563], localhost[:8563], localhost:8563/nocertcheck, n11,n12,n13[:8563]
+    -u <user>                       User name
+    -p <passwd>                     Password (if omitted, prompt)
+    -s <schema>                     Open schema <schema> after login
+File options:
+    -init <file>                    Initialization script, executed after connection establishment
+    -f <file>                       Execute SQL input file (semicolon splitter; CREATE SCRIPT/UDF uses /; or / terminator)
+    -B <file>                       Execute SQL input file as a single statement
+    -sql <SQL statement>            Execute statement and exit
+
+Other options:
+    -autocommit {ON|OFF}            Set autocommit mode (default: ON)
+    -autoCompletion {ON|OFF}        Enable or disable autocompletion (stub)
+    -F <num>                        Fetch size of resultsets in kB (default: 1000)
+    -Q <num>                        Timeout for queries in seconds (-1 for unlimited, default: -1)
+    -q                              Quiet mode
+    -x                              Exit on any error
+]])
+end
+
+local function parse_args(argv)
+  local opts = {
+    autocommit = 'ON',
+    fetch_kb = 1000,
+    query_timeout = -1,
+    quiet = false,
+    exit_on_error = false,
+  }
+  local i = 1
+  while i <= #argv do
+    local a = argv[i]
+    if a == '-help' then
+      print_help()
+      os.exit(0)
+    elseif a == '-version' then
+      print(VERSION)
+      os.exit(0)
+    elseif a == '-c' then
+      opts.conn = argv[i+1]; i = i + 1
+    elseif a == '-u' then
+      opts.user = argv[i+1]; i = i + 1
+    elseif a == '-p' or a == '-P' then
+      opts.pass = argv[i+1]; i = i + 1
+    elseif a == '-s' then
+      opts.schema = argv[i+1]; i = i + 1
+    elseif a == '-sql' then
+      opts.sql = argv[i+1]; i = i + 1
+    elseif a == '-f' then
+      opts.file = argv[i+1]; i = i + 1
+    elseif a == '-B' then
+      opts.batch = argv[i+1]; i = i + 1
+    elseif a == '-init' then
+      opts.init = argv[i+1]; i = i + 1
+    elseif a == '-autocommit' then
+      opts.autocommit = argv[i+1]; i = i + 1
+    elseif a == '-autoCompletion' then
+      opts.auto_completion = argv[i+1]; i = i + 1
+    elseif a == '-F' then
+      opts.fetch_kb = tonumber(argv[i+1]); i = i + 1
+    elseif a == '-Q' then
+      opts.query_timeout = tonumber(argv[i+1]); i = i + 1
+    elseif a == '-q' then
+      opts.quiet = true
+    elseif a == '-x' then
+      opts.exit_on_error = true
+    elseif a == '--' then
+      break
+    else
+      write_error('Unknown option: ' .. tostring(a))
+      print_help()
+      os.exit(2)
+    end
+    i = i + 1
+  end
+  return opts
+end
+
+local function parse_connection(conn)
+  if not conn then
+    error('missing -c <connection string>')
+  end
+  if conn:find('://') then
+    error('invalid connection string: use host[,host2][/fingerprint][:port]')
+  end
+  local host, port, cert = conn:match('^([^/]+):(%d+)/([^/]+)$')
+  if host then
+    return host, tonumber(port), cert:lower()
+  end
+  host, cert, port = conn:match('^([^/]+)/([^:]+):(%d+)$')
+  if host then
+    return host, tonumber(port), cert:lower()
+  end
+  host, cert = conn:match('^([^/]+)/([^:]+)$')
+  if host then
+    return host, 8563, cert:lower()
+  end
+  host, port = conn:match('^([^:]+):(%d+)$')
+  if host then
+    return host, tonumber(port), nil
+  end
+  if conn:match('^[^/]+$') then
+    return conn, 8563, nil
+  end
+  error('invalid connection string: ' .. conn)
+end
+
+local function split_hosts(s)
+  local t = {}
+  for part in string.gmatch(s, '([^,]+)') do
+    local h = part:match('^%s*(.-)%s*$')
+    if h ~= '' then
+      t[#t+1] = h
+    end
+  end
+  return t
+end
+
+local function shuffle_hosts(t)
+  for i = #t, 2, -1 do
+    local j = math.random(i)
+    t[i], t[j] = t[j], t[i]
+  end
+end
+
+local function known_hosts_path()
+  local env = os.getenv('EXAPLUS_KNOWN_HOSTS')
+  if env and env ~= '' then return env end
+  local home = os.getenv('HOME')
+  if home and home ~= '' then
+    return home .. '/.exaplus_known_hosts'
+  end
+  return '/tmp/exaplus_known_hosts'
+end
+
+local function history_path()
+  local env = os.getenv('EXAPLUS_HISTORY')
+  if env and env ~= '' then return env end
+  local home = os.getenv('HOME')
+  if home and home ~= '' then
+    return home .. '/.exaplus_history'
+  end
+  return '/tmp/exaplus_history'
+end
+
+local function load_known_hosts(path)
+  local t = {}
+  local f = io.open(path, 'r')
+  if not f then return t end
+  for line in f:lines() do
+    local hostport, fp = line:match('^(%S+)%s+(%S+)$')
+    if hostport and fp then
+      t[hostport] = util.hex_normalize(fp)
+    end
+  end
+  f:close()
+  return t
+end
+
+local function save_known_hosts(path, t)
+  local dir = path:match('^(.+)/[^/]+$')
+  if dir and dir ~= '' then
+    os.execute(string.format('mkdir -p %q 2>/dev/null', dir))
+  end
+  local keys = {}
+  for k,_ in pairs(t) do keys[#keys+1] = k end
+  table.sort(keys)
+  local f = assert(io.open(path, 'w'))
+  for _,k in ipairs(keys) do
+    f:write(k, ' ', t[k], '\n')
+  end
+  f:close()
+end
+
+local function cert_changed_error(hostkey, path, old_fp, new_fp)
+  return table.concat({
+    'WARNING: REMOTE CERTIFICATE HAS CHANGED!',
+    'Host: ' .. hostkey,
+    'Old:  ' .. (old_fp or 'unknown'),
+    'New:  ' .. (new_fp or 'unknown'),
+    'If you trust the new certificate, run once with /nocertcheck to update',
+    'or remove the entry manually from: ' .. path,
+  }, '\n')
+end
+
+local function read_file(path)
+  local f = io.open(path, 'rb')
+  if not f then error('cannot open file: ' .. path) end
+  local data = f:read('*a')
+  f:close()
+  return data
+end
+
+local function strip_leading_ws_comments(s)
+  local i = 1
+  local n = #s
+  while i <= n do
+    while i <= n and s:sub(i,i):match('%s') do i = i + 1 end
+    if s:sub(i,i+1) == '--' then
+      local nl = s:find('\n', i+2, true)
+      if not nl then return '' end
+      i = nl + 1
+    elseif s:sub(i,i+1) == '/*' then
+      local close = s:find('*/', i+2, true)
+      if not close then return '' end
+      i = close + 2
+    else
+      break
+    end
+  end
+  return s:sub(i)
+end
+
+local SCRIPT_QUALIFIERS = {
+  EXTERNAL = true,
+  LUA = true,
+  PYTHON3 = true,
+  PYTHON = true,
+  JAVA = true,
+  R = true,
+  SCALAR = true,
+  SET = true,
+  PREPROCESSOR = true,
+}
+
+local function looks_like_create_script(sql)
+  local s = strip_leading_ws_comments(sql)
+  if s == '' then return false end
+  local tokens = {}
+  for tok in s:gmatch('[A-Za-z0-9_]+') do
+    tokens[#tokens+1] = tok:upper()
+    if #tokens >= 12 then break end
+  end
+  if tokens[1] ~= 'CREATE' then return false end
+  local i = 2
+  if tokens[i] == 'OR' and tokens[i+1] == 'REPLACE' then
+    i = i + 2
+  end
+  while tokens[i] and SCRIPT_QUALIFIERS[tokens[i]] do
+    i = i + 1
+  end
+  return tokens[i] == 'SCRIPT'
+end
+
+local function is_script_terminator(line)
+  local t = line:gsub('\r','')
+  t = t:gsub('^%s+',''):gsub('%s+$','')
+  return t == '/;' or t == '/'
+end
+
+local function split_sql(text, require_terminator)
+  local stmts = {}
+  local buf = {}
+  local in_s, in_d = false, false
+  local in_script = false
+
+  local function flush_stmt()
+    local stmt = table.concat(buf):gsub('%s+$','')
+    if stmt ~= '' then stmts[#stmts+1] = stmt end
+    buf = {}
+    in_s, in_d = false, false
+  end
+
+  local function check_script_start()
+    if in_script or in_s or in_d then return end
+    local stmt = table.concat(buf)
+    if looks_like_create_script(stmt) then
+      in_script = true
+      in_s, in_d = false, false
+    end
+  end
+
+  local pos = 1
+  while pos <= #text do
+    local nl = text:find('\n', pos, true)
+    local line
+    if nl then
+      line = text:sub(pos, nl)
+      pos = nl + 1
+    else
+      line = text:sub(pos)
+      pos = #text + 1
+    end
+
+    if in_script then
+      local line_no_nl = line
+      if line_no_nl:sub(-1) == '\n' then
+        line_no_nl = line_no_nl:sub(1, -2)
+      end
+      if is_script_terminator(line_no_nl) then
+        flush_stmt()
+        in_script = false
+      else
+        buf[#buf+1] = line
+      end
+    else
+      local i = 1
+      while i <= #line do
+        local ch = line:sub(i,i)
+        local nxt = line:sub(i+1,i+1)
+        if ch == "'" and not in_d then
+          if in_s and nxt == "'" then
+            buf[#buf+1] = ch
+            buf[#buf+1] = nxt
+            i = i + 2
+          else
+            in_s = not in_s
+            buf[#buf+1] = ch
+            i = i + 1
+          end
+        elseif ch == '"' and not in_s then
+          in_d = not in_d
+          buf[#buf+1] = ch
+          i = i + 1
+        elseif ch == ';' and not in_s and not in_d then
+          flush_stmt()
+          i = i + 1
+        else
+          buf[#buf+1] = ch
+          i = i + 1
+        end
+      end
+      check_script_start()
+    end
+  end
+
+  local remainder = table.concat(buf)
+  if not require_terminator then
+    local stmt = remainder:gsub('%s+$','')
+    if stmt ~= '' then stmts[#stmts+1] = stmt end
+    remainder = ''
+  else
+    if remainder:match('^%s*$') then
+      remainder = ''
+    end
+  end
+  return stmts, remainder
+end
+
+local function print_result_set(rs, fetch_fn, fetch_kb)
+  local cols = rs.columns or {}
+  local headers = {}
+  local widths = {}
+  for i=1,#cols do
+    headers[i] = cols[i].name or ('C'..i)
+    widths[i] = #headers[i]
+  end
+
+  local rows = {}
+  local max_sample = 100
+  local total_rows = 0
+  local header_printed = false
+  local function line()
+    local parts = {'+'}
+    for i=1,#cols do
+      parts[#parts+1] = string.rep('-', widths[i] + 2)
+      parts[#parts+1] = '+'
+    end
+    print(table.concat(parts))
+  end
+  local function truncate_cell(v, w)
+    if #v <= w then return v end
+    if w <= 3 then return v:sub(1, w) end
+    return v:sub(1, w - 3) .. '...'
+  end
+
+  local function rowprint(vals)
+    local parts = {'|'}
+    for i=1,#cols do
+      local v2 = vals[i] or ''
+      v2 = truncate_cell(v2, widths[i])
+      parts[#parts+1] = ' ' .. v2 .. string.rep(' ', widths[i] - #v2) .. ' '
+      parts[#parts+1] = '|'
+    end
+    print(table.concat(parts))
+  end
+  local function add_data(data, nrows)
+    if not data or #data == 0 or nrows <= 0 then return end
+    for r=1,nrows do
+      local row = {}
+      for c=1,#cols do
+        local col = data[c] or {}
+        local v = col[r]
+        if v == nil then v = 'NULL' end
+        local s = tostring(v)
+        row[c] = s
+        if total_rows < max_sample and #s > widths[c] then widths[c] = #s end
+      end
+      total_rows = total_rows + 1
+      if total_rows <= max_sample then
+        rows[#rows+1] = row
+      else
+        if not header_printed then
+          line()
+          rowprint(headers)
+          line()
+          for _, rr in ipairs(rows) do rowprint(rr) end
+          rows = nil
+          header_printed = true
+        end
+        rowprint(row)
+      end
+    end
+  end
+
+  local num_in = rs.numRowsInMessage or ((rs.data and rs.data[1] and #rs.data[1]) or 0)
+  if rs.data then
+    add_data(rs.data, num_in)
+  end
+
+  if rs.resultSetHandle then
+    local pos = num_in
+    local total = rs.numRows or 0
+    while pos < total do
+      local rep = fetch_fn(rs.resultSetHandle, pos, fetch_kb * 1024)
+      local n = rep.numRows or 0
+      add_data(rep.data, n)
+      pos = pos + n
+      if n == 0 then break end
+    end
+  end
+
+  if #cols == 0 then
+    return
+  end
+
+  if total_rows <= max_sample then
+    line()
+    rowprint(headers)
+    line()
+    for _, r in ipairs(rows) do
+      rowprint(r)
+    end
+    line()
+  else
+    if header_printed then
+      line()
+    else
+      line()
+      rowprint(headers)
+      line()
+      for _, r in ipairs(rows or {}) do rowprint(r) end
+      line()
+    end
+  end
+  local label = total_rows == 1 and 'row' or 'rows'
+  print(total_rows .. ' ' .. label .. ' in resultset.')
+end
+
+local function verify_peer(ws, host, port, certspec, opts)
+  local hostkey = host .. ':' .. tostring(port)
+  local kh_path = known_hosts_path()
+  local known = load_known_hosts(kh_path)
+  local peer = util.hex_normalize(ws.fingerprint or '')
+  if peer == '' then
+    return false, 'no peer certificate fingerprint'
+  end
+
+  if certspec and certspec ~= 'nocertcheck' then
+    local expected = util.hex_normalize(certspec)
+    if expected ~= peer then
+      return false, 'certificate fingerprint mismatch for ' .. hostkey .. '\n' ..
+        'Expected: ' .. expected .. '\n' ..
+        'Actual:   ' .. peer .. '\n' ..
+        'If you trust the new certificate, run once with /nocertcheck to update'
+    end
+  end
+
+  if certspec == 'nocertcheck' then
+    if known[hostkey] ~= peer then
+      known[hostkey] = peer
+      save_known_hosts(kh_path, known)
+      if not opts.quiet then
+        print('Saved certificate fingerprint for ' .. hostkey .. ' to ' .. kh_path)
+      end
+    end
+  else
+    if known[hostkey] and known[hostkey] ~= peer then
+      return false, cert_changed_error(hostkey, kh_path, known[hostkey], peer)
+    elseif not known[hostkey] then
+      known[hostkey] = peer
+      save_known_hosts(kh_path, known)
+      if not opts.quiet then
+        print('Saved certificate fingerprint for ' .. hostkey .. ' to ' .. kh_path)
+      end
+    end
+  end
+
+  return true, nil
+end
+
+local function connect_any(hosts, port, certspec, opts)
+  local list = {}
+  for i, h in ipairs(hosts) do list[i] = h end
+  if #list > 1 then
+    math.randomseed(os.time())
+    shuffle_hosts(list)
+  end
+  local errs = {}
+  for _, host in ipairs(list) do
+    local ok, ws_or_err, err = pcall(websocket.connect, {host=host, port=port})
+    if not ok then
+      errs[#errs+1] = host .. ': ' .. tostring(ws_or_err)
+    elseif not ws_or_err then
+      errs[#errs+1] = host .. ': ' .. tostring(err or 'connect failed')
+    else
+      local ws = ws_or_err
+      local ok2, verr = verify_peer(ws, host, port, certspec, opts)
+      if ok2 then
+        return ws, host
+      end
+      ws:close()
+      errs[#errs+1] = host .. ': ' .. tostring(verr or 'certificate rejected')
+    end
+  end
+  return nil, nil, table.concat(errs, '\n')
+end
+
+local function main()
+  local opts = parse_args(arg)
+  local stdin_tty = stdin_is_tty()
+  local suppress_banner = not stdin_tty
+
+  local host_spec, port, certspec = parse_connection(opts.conn)
+  local hosts = split_hosts(host_spec)
+  if #hosts == 0 then
+    error('invalid connection string: ' .. tostring(opts.conn))
+  end
+
+  if not opts.user then error('missing -u <user>') end
+  if not opts.pass then
+    opts.pass = util.read_password('Password: ')
+  end
+
+  if not opts.quiet and not suppress_banner then
+    print(VERSION)
+  end
+
+  local ws, host, err = connect_any(hosts, port, certspec, opts)
+  if not ws then error(err or 'connection failed') end
+
+  local session_attrs = {}
+  local function update_attrs(attrs)
+    if type(attrs) ~= 'table' then return end
+    for k,v in pairs(attrs) do
+      session_attrs[k] = v
+    end
+  end
+
+  local function send_req(req)
+    ws:send_text(json.encode(req))
+    local rep, rerr = ws:recv()
+    if not rep then error(rerr or 'connection closed') end
+    local obj = json.decode(rep)
+    if obj.attributes then
+      update_attrs(obj.attributes)
+    end
+    if obj.status == 'ok' then
+      if obj.exception then
+        error('[' .. (obj.exception.sqlCode or '00000') .. '] ' .. (obj.exception.text or ''), 0)
+      end
+      return obj.responseData or obj.attributes
+    elseif obj.status == 'error' then
+      error('[' .. (obj.exception and obj.exception.sqlCode or '00000') .. '] ' .. (obj.exception and obj.exception.text or ''), 0)
+    else
+      error('Unexpected response: ' .. rep, 0)
+    end
+  end
+
+  -- login
+  local login1 = send_req({command='login', protocolVersion=5})
+  local pw = rsa.encrypt_pkcs1_v15(opts.pass, login1.publicKeyExponent, login1.publicKeyModulus)
+  local attrs = {}
+  if opts.autocommit then attrs.autocommit = (opts.autocommit:upper() ~= 'OFF') end
+  if opts.query_timeout and opts.query_timeout >= 0 then attrs.queryTimeout = opts.query_timeout end
+  local login2 = send_req({
+    username = opts.user,
+    password = pw,
+    useCompression = false,
+    clientName = 'EXAplusLua',
+    driverName = 'WS',
+    clientOs = 'Linux',
+    clientOsUsername = os.getenv('USER') or 'unknown',
+    clientVersion = '0.1',
+    clientRuntime = 'Lua 5.1',
+    attributes = attrs,
+  })
+  local db_version = login2 and login2.releaseVersion or nil
+  if not opts.quiet and db_version then
+    print('DB Version: ' .. tostring(db_version))
+  end
+
+  local function fetch_fn(handle, start, numbytes)
+    return send_req({command='fetch', resultSetHandle=handle, startPosition=start, numBytes=numbytes})
+  end
+
+  local function exec_sql(sql)
+    local function handle_client_command(stmt)
+      local s = stmt:gsub('%s+$', ''):gsub('^%s+', '')
+      local include = s:match('^@%s*([^%s;]+)%s*;?$')
+      if include then
+        local data = read_file(include)
+        local stmts = split_sql(data, false)
+        for _, sub in ipairs(stmts) do
+          local ok, err = pcall(exec_sql, sub)
+          if not ok then error(err) end
+          if opts._exit_requested then break end
+        end
+        return true
+      end
+
+      local is_exit = s:match('^[Ee][Xx][Ii][Tt]%s*;?$') or s:match('^[Qq][Uu][Ii][Tt]%s*;?$')
+      if is_exit then
+        opts._exit_requested = true
+        return true
+      end
+
+      local ac_on = s:match('^[Ss][Ee][Tt]%s+[Aa][Uu][Tt][Oo][Cc][Oo][Mm][Mm][Ii][Tt]%s+[Oo][Nn]%s*;?$')
+      local ac_off = s:match('^[Ss][Ee][Tt]%s+[Aa][Uu][Tt][Oo][Cc][Oo][Mm][Mm][Ii][Tt]%s+[Oo][Ff][Ff]%s*;?$')
+      if ac_on or ac_off then
+        local on = ac_on ~= nil
+        session_attrs.autocommit = on
+        opts.autocommit = on and 'ON' or 'OFF'
+        send_req({command='setAttributes', attributes={autocommit=on}})
+        return true
+      end
+      return false
+    end
+
+    if handle_client_command(sql) then
+      return
+    end
+    local rep = send_req({command='execute', sqlText=sql})
+    local results = rep.results or {}
+    for _, res in ipairs(results) do
+      if res.resultType == 'rowCount' then
+        print('Rows affected: ' .. tostring(res.rowCount or 0))
+      elseif res.resultType == 'resultSet' then
+        print_result_set(res.resultSet, fetch_fn, opts.fetch_kb)
+        if res.resultSet and res.resultSet.resultSetHandle then
+          send_req({command='closeResultSet', resultSetHandles={res.resultSet.resultSetHandle}})
+        end
+      end
+    end
+  end
+
+  local function close_session()
+    ws:close()
+    if not opts.quiet then
+      print('Disconnected.')
+    end
+  end
+
+  local current_schema = opts.schema
+  if opts.schema then
+    exec_sql('OPEN SCHEMA ' .. opts.schema)
+  else
+    local ok_attr, attrs = pcall(send_req, {command='getAttributes'})
+    if ok_attr and attrs and attrs.currentSchema then
+      current_schema = attrs.currentSchema
+      update_attrs(attrs)
+    end
+  end
+
+  if opts.init then
+    local data = read_file(opts.init)
+    local stmts = split_sql(data, false)
+    for _, s in ipairs(stmts) do
+      local ok, err = pcall(exec_sql, s)
+      if not ok then
+        write_error(err)
+        if opts.exit_on_error then os.exit(1) end
+      end
+    end
+  end
+
+  if opts.batch then
+    local data = read_file(opts.batch)
+    exec_sql(data)
+    close_session()
+    return
+  end
+
+  if opts.file then
+    local data = read_file(opts.file)
+    local stmts = split_sql(data, false)
+    for _, s in ipairs(stmts) do
+      local ok, err = pcall(exec_sql, s)
+      if not ok then
+        write_error(err)
+        if opts.exit_on_error then os.exit(1) end
+      end
+      if opts._exit_requested then break end
+    end
+    close_session()
+    return
+  end
+
+  if opts.sql then
+    local ok, err = pcall(exec_sql, opts.sql)
+    if not ok then
+      write_error(err)
+      os.exit(1)
+    end
+    close_session()
+    return
+  end
+
+  local function echo_stmt(stmt)
+    if opts.quiet then return end
+    local s = stmt:gsub('\r','')
+    local lines = {}
+    local start = 1
+    while true do
+      local nl = s:find('\n', start, true)
+      if not nl then
+        lines[#lines+1] = s:sub(start)
+        break
+      end
+      lines[#lines+1] = s:sub(start, nl - 1)
+      start = nl + 1
+    end
+    for _, line in ipairs(lines) do
+      if line:match('^%s*$') then
+        io.write('\n')
+      else
+        io.write('SQL_EXA> ' .. line .. '\n')
+      end
+    end
+  end
+
+  if not stdin_tty then
+    local data = io.read('*a') or ''
+    local hist = lineedit.new_history()
+    lineedit.load_history(hist, history_path(), 500)
+    if data ~= '' then
+      local stmts = split_sql(data, false)
+      for _, s in ipairs(stmts) do
+        echo_stmt(s)
+        local ok, err = pcall(exec_sql, s)
+        if not ok then
+          write_error(err)
+          if opts.exit_on_error then os.exit(1) end
+        end
+        lineedit.add_history(hist, s)
+        if opts._exit_requested then break end
+      end
+    end
+    lineedit.save_history(hist, history_path(), 500)
+    close_session()
+    return
+  end
+
+  -- interactive
+  if not opts.quiet then
+    io.write('Connected. Enter SQL (end with ;). Use quit or exit to leave.\n')
+  end
+  local buffer = ''
+  local hist = lineedit.new_history()
+  lineedit.load_history(hist, history_path(), 500)
+  local function build_status()
+    if opts.quiet then return '' end
+    local ac = session_attrs.autocommit
+    if ac == nil then
+      ac = (opts.autocommit and opts.autocommit:upper() ~= 'OFF') and true or false
+    end
+    local acs = ac and 'AC:ON' or 'AC:OFF'
+    local ver = db_version or 'unknown'
+    local schema = session_attrs.currentSchema or current_schema
+    local schema_part = schema and (' | SCHEMA ' .. schema) or ''
+    return '\27[7m ' .. ('DB ' .. ver .. ' | ' .. acs .. ' | ' .. opts.user .. '@' .. host .. ':' .. tostring(port) .. schema_part) .. ' \27[0m'
+  end
+  while true do
+    local prompt = 'SQL_EXA> '
+    local line = lineedit.readline(prompt, hist, build_status())
+    if not line then break end
+    if line ~= lineedit.CANCEL then
+      local trimmed = line:gsub('^%s+',''):gsub('%s+$','')
+      local lower = trimmed:lower()
+      if buffer == '' and (lower == 'quit' or lower == 'exit' or lower == 'quit;' or lower == 'exit;') then
+        break
+      end
+      if trimmed ~= '' then
+        lineedit.add_history(hist, line)
+      end
+      buffer = buffer .. line .. '\n'
+      local stmts, rem = split_sql(buffer, true)
+      if #stmts > 0 then
+        -- execute all complete statements, keep remainder
+        for i=1,#stmts do
+        local ok, err = pcall(exec_sql, stmts[i])
+        if not ok then
+          write_error(err)
+          if opts.exit_on_error then os.exit(1) end
+        end
+        if opts._exit_requested then break end
+      end
+        buffer = rem or ''
+        if opts._exit_requested then break end
+      end
+    else
+      buffer = ''
+    end
+  end
+  lineedit.save_history(hist, history_path(), 500)
+  close_session()
+end
+
+local ok, err = pcall(main)
+if not ok then
+  write_error(err)
+  os.exit(1)
+end
