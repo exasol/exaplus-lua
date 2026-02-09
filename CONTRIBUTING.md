@@ -33,3 +33,6 @@ The `tests/` scripts require access to an Exasol instance. If you have a local s
 
 ## License
 By contributing, you agree that your contributions are licensed under the project license in `LICENSE`.
+
+## Contributor License Policy
+This project uses the inbound=outbound model. There is no CLA or DCO required.

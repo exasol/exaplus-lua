@@ -31,6 +31,15 @@ and license texts before release.
 - Action: Verify linkage and include required notices if distributing binaries.
 
 ## Internal Modules
-The `lib/` Lua modules do not include third‑party attributions in‑tree. If any
-files under `lib/` are derived from external sources, add the appropriate
-notices and licenses here.
+The following `lib/` modules are part of this repository and are assumed to be
+original to this project unless noted otherwise. If any of these files are
+derived from external sources, add the appropriate notices and licenses here.
+
+- `lib/base64.lua`
+- `lib/bigint.lua`
+- `lib/json.lua`
+- `lib/lineedit.lua`
+- `lib/rsa.lua`
+- `lib/sha1.lua`
+- `lib/util.lua`
+- `lib/websocket.lua`

@@ -7,7 +7,15 @@ local function run(cmd)
   return rc, out
 end
 
-local exaplus = './exaplus'
+local function script_dir()
+  local src = debug.getinfo(1, 'S').source
+  if src:sub(1, 1) == '@' then
+    src = src:sub(2)
+  end
+  return (src:match('(.*/)[^/]*$') or './')
+end
+
+local exaplus = os.getenv('EXAPLUS_BIN') or (script_dir() .. '../exaplus')
 local default_fp = '9aefaa1987a5a191d6e23c714a480b461c5e3462e0a98ffb6683edb10fa99400'
 local fp = os.getenv('EXAPLUS_TEST_FINGERPRINT') or default_fp
 local conn = 'localhost/' .. fp .. ':8563'

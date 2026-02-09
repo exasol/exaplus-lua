@@ -1,6 +1,25 @@
 # EXAplusLua (minimal)
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 A minimal Lua-based console client for Exasol WebSocket API v5. This is a simplified replacement for `Console/exaplus` with a reduced CLI.
+
+## Requirements
+
+- Lua 5.1 (invoked as `lua` or `lua5.1`)
+- OpenSSL (required by LuaSec)
+
+## Installation
+
+This repo ships a single script (`exaplus`) plus bundled Lua modules under `lib/` and `vendor/`.
+
+- Linux x86_64: you can run `./exaplus` directly (bundled LuaSocket/LuaSec binaries are included).
+- Other platforms: rebuild LuaSocket/LuaSec for your platform or use system packages and set `LUA_PATH`/`LUA_CPATH` accordingly.
+
+## Supported Platforms
+
+- Linux x86_64 with the bundled native LuaSocket/LuaSec modules.
+- Other platforms are untested and require rebuilding the native modules.
 
 ## Usage
 
@@ -60,6 +79,29 @@ History is saved to `~/.exaplus_history` (override with `EXAPLUS_HISTORY`).
 - JSON messages are uncompressed.
 - Interactive mode includes in-memory history with Up/Down and Ctrl+R reverse search.
 - CREATE SCRIPT / UDF statements ignore semicolons inside the body until a line with only `/;` (or `/`) is seen.
+
+## Tests
+
+Tests require access to an Exasol instance:
+
+```
+./tests/run_all.sh
+```
+
+## Limitations
+
+- Not a full replacement for the full `exaplus` CLI; only the options listed above are supported.
+- Requires Exasol WebSocket API v5.
+- JSON messages are uncompressed.
+- Bundled native modules are Linux x86_64 only.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+## Trademark
+
+Exasol is a trademark of Exasol AG. This project is not affiliated with or endorsed by Exasol.
 
 ## Shortcuts
 
