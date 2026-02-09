@@ -99,10 +99,13 @@ Tests require access to an Exasol instance:
 
 ## Binary Distribution
 
-If you distribute the static binary built by `tools/build_static_alpine.sh`,
-include third‑party notices and license texts (see `THIRD_PARTY_NOTICES.md`).
-The static build links OpenSSL, so be sure to include the Apache-2.0 license
-text and any NOTICE file from the exact OpenSSL version used.
+Static builds are produced by `tools/build_all.sh` and packaged as tarballs in
+`build/out/` (e.g., `exaplus-<version>-linux-<arch>.tar.gz`,
+`exaplus-<version>-darwin-<arch>.tar.gz`).
+
+If you distribute these binaries, include third‑party notices and license texts
+(see `THIRD_PARTY_NOTICES.md`). The static build links OpenSSL, so include the
+Apache-2.0 license text and any NOTICE file from the exact OpenSSL version used.
 
 ## Limitations
 
