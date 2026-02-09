@@ -4,6 +4,8 @@
 
 A minimal Lua-based console client for Exasol WebSocket API v5. This is a simplified replacement for `Console/exaplus` with a reduced CLI.
 
+<img width="1006" height="820" alt="image" src="https://github.com/user-attachments/assets/48e32c2d-56b8-44e3-b990-abc93bcf6704" />
+
 ## Requirements
 
 - Lua 5.1 (invoked as `lua` or `lua5.1`)
