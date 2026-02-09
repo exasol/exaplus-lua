@@ -32,8 +32,9 @@ and license texts before release.
 
 ## Internal Modules
 The following `lib/` modules are part of this repository and are assumed to be
-original to this project unless noted otherwise. If any of these files are
-derived from external sources, add the appropriate notices and licenses here.
+original to this project unless noted otherwise. This includes the JSON, RSA,
+and SHA1 implementations used by the client. If any of these files are derived
+from external sources, add the appropriate notices and licenses here.
 
 - `lib/base64.lua`
 - `lib/bigint.lua`

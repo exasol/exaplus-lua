@@ -13,6 +13,10 @@ This repo is a single-file Lua client with local Lua modules under `lib/` and bu
 ### Lua version
 This project targets Lua 5.1.
 
+### Style
+- Follow the existing style in the file you are editing.
+- Use two spaces for indentation and avoid trailing whitespace.
+
 ### Quick Syntax Check
 ```bash
 luac5.1 -p lib/*.lua tests/*.lua vendor/lua/5.1/*.lua vendor/lua/5.1/socket/*.lua vendor/lua/5.1/ssl/*.lua
