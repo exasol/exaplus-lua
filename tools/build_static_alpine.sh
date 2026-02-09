@@ -166,10 +166,14 @@ int main(int argc, char **argv) {
 }
 C
 
-python3 - <<'PY'
-import os, sys
+OUTDIR="$OUTDIR" LUASOCKET_DIR="$LUASOCKET_DIR" LUASEC_DIR="$LUASEC_DIR" python3 - <<'PY'
+import os
 
 root = "/work"
+outdir = os.environ["OUTDIR"]
+luasocket_dir = os.environ.get("LUASOCKET_DIR", "")
+luasec_dir = os.environ.get("LUASEC_DIR", "")
+
 modules = {
   "base64": "lib/base64.lua",
   "bigint": "lib/bigint.lua",
@@ -179,19 +183,34 @@ modules = {
   "sha1": "lib/sha1.lua",
   "util": "lib/util.lua",
   "websocket": "lib/websocket.lua",
-  "socket": "vendor/lua/5.1/socket.lua",
-  "ssl": "vendor/lua/5.1/ssl.lua",
 }
 
 def read(path):
   with open(os.path.join(root, path), "r", encoding="utf-8") as f:
     return f.read()
 
+def add_tree(base_dir, prefix=""):
+  if not base_dir or not os.path.isdir(base_dir):
+    return
+  for dirpath, _, filenames in os.walk(base_dir):
+    for fname in filenames:
+      if not fname.endswith(".lua"):
+        continue
+      full = os.path.join(dirpath, fname)
+      rel = os.path.relpath(full, base_dir).replace(os.sep, "/")
+      mod = rel[:-4].replace("/", ".")
+      if prefix:
+        mod = prefix + "." + mod if mod else prefix
+      modules[mod] = os.path.relpath(full, root)
+
 def lua_long_bracket(s):
   eq = 1
   while ("]" + ("=" * eq) + "]") in s:
     eq += 1
   return "[" + ("=" * eq) + "[\n" + s + "]" + ("=" * eq) + "]"
+
+add_tree(os.path.join(luasocket_dir, "src"), "")
+add_tree(os.path.join(luasec_dir, "src"), "")
 
 bundle = []
 bundle.append("local function _preload(name, src)")
@@ -214,14 +233,15 @@ bundle.append("local f, err = loadstring(main_src, '@exaplus')")
 bundle.append("if not f then error(err) end")
 bundle.append("return f()")
 
-out_path = "/work/build/static/" + os.environ.get("TARGET_ARCH", "x86") + "/.work/bundle.lua"
+out_path = os.path.join(outdir, ".work", "bundle.lua")
 with open(out_path, "w", encoding="utf-8") as f:
   f.write("\n".join(bundle))
 PY
 
-python3 - <<'PY'
+OUTDIR="$OUTDIR" python3 - <<'PY'
 import os
-path = "/work/build/static/" + os.environ.get("TARGET_ARCH", "x86") + "/.work/bundle.lua"
+outdir = os.environ["OUTDIR"]
+path = os.path.join(outdir, ".work", "bundle.lua")
 with open(path, "rb") as f:
   data = f.read()
 out = []
@@ -232,7 +252,7 @@ for i, b in enumerate(data):
   out.append(" %d," % b)
 out.append("\n};\n")
 out.append("const unsigned int bundle_lua_len = %d;\n" % len(data))
-with open("/work/build/static/" + os.environ.get("TARGET_ARCH", "x86") + "/.work/bundle.c", "w", encoding="utf-8") as f:
+with open(os.path.join(outdir, ".work", "bundle.c"), "w", encoding="utf-8") as f:
   f.write("".join(out))
 PY
 

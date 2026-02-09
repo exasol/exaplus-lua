@@ -1,18 +1,119 @@
 #!/usr/bin/env lua
 
+local VERSION = 'EXAplusLua 0.2'
+
 local root = debug.getinfo(1, 'S').source:match('@(.*/)') or './'
-package.path = root .. 'lib/?.lua;' .. root .. 'lib/?/init.lua;' ..
-               root .. 'vendor/lua/5.1/?.lua;' .. root .. 'vendor/lua/5.1/?/init.lua;' ..
-               root .. 'vendor/lua/5.1/?/?.lua;' .. package.path
-package.cpath = root .. 'vendor/lua/5.1/?.so;' .. root .. 'vendor/lua/5.1/?/?.so;' .. package.cpath
+local use_bundled = os.getenv('EXAPLUS_USE_BUNDLED') == '1'
+package.path = root .. 'lib/?.lua;' .. root .. 'lib/?/init.lua;' .. package.path
+if use_bundled then
+  package.path = root .. 'vendor/lua/5.1/?.lua;' .. root .. 'vendor/lua/5.1/?/init.lua;' ..
+                 root .. 'vendor/lua/5.1/?/?.lua;' .. package.path
+  package.cpath = root .. 'vendor/lua/5.1/?.so;' .. root .. 'vendor/lua/5.1/?/?.so;' .. package.cpath
+end
+
+local function ensure_local_libs()
+  local lib_paths = root .. 'lib/?.lua;' .. root .. 'lib/?/init.lua;'
+  if not package.path:find(root .. 'lib/%?%.lua', 1, true) then
+    package.path = lib_paths .. package.path
+  end
+end
+
+local function detect_os()
+  local sep = package.config:sub(1, 1)
+  if sep == '\\' then
+    return 'windows'
+  end
+  local ok, p = pcall(io.popen, 'uname -s 2>/dev/null')
+  if ok and p then
+    local out = p:read('*l') or ''
+    p:close()
+    if out == 'Darwin' then return 'darwin' end
+    if out == 'Linux' then return 'linux' end
+  end
+  return 'unix'
+end
+
+local function missing_native_instructions()
+  local osname = detect_os()
+  local lua_ver = _VERSION:match('Lua%s+([0-9]+%.[0-9]+)') or '5.1'
+  if osname == 'linux' then
+    return table.concat({
+      'Install LuaSocket and LuaSec for Lua ' .. lua_ver .. ':',
+      '- distro packages (examples):',
+      '  - Debian/Ubuntu: apt install lua-socket lua-sec',
+      '  - RHEL/Fedora: dnf install lua-socket lua-sec',
+      '- or via luarocks:',
+      '  luarocks --lua-version=' .. lua_ver .. ' install luasocket',
+      '  luarocks --lua-version=' .. lua_ver .. ' install luasec',
+    }, '\n')
+  elseif osname == 'darwin' then
+    return table.concat({
+      'Install LuaSocket and LuaSec for Lua ' .. lua_ver .. ':',
+      '- Homebrew: brew install lua@' .. lua_ver .. ' luarocks openssl@3',
+      '- then:',
+      '  luarocks --lua-version=' .. lua_ver .. ' install luasocket',
+      '  luarocks --lua-version=' .. lua_ver .. ' install luasec',
+    }, '\n')
+  elseif osname == 'windows' then
+    return table.concat({
+      'Install LuaSocket and LuaSec for Lua ' .. lua_ver .. ':',
+      '- Install Lua + LuaRocks, then:',
+      '  luarocks --lua-version=' .. lua_ver .. ' install luasocket',
+      '  luarocks --lua-version=' .. lua_ver .. ' install luasec',
+    }, '\n')
+  end
+  return table.concat({
+    'Install LuaSocket and LuaSec for Lua ' .. lua_ver .. '.',
+    'Using LuaRocks:',
+    '  luarocks --lua-version=' .. lua_ver .. ' install luasocket',
+    '  luarocks --lua-version=' .. lua_ver .. ' install luasec',
+  }, '\n')
+end
+
+local function require_native(mod)
+  local ok = pcall(require, mod)
+  if ok then return true end
+  io.stderr:write('Error: missing native module: ' .. mod .. '\n')
+  io.stderr:write('Lua version: ' .. tostring(_VERSION) .. '\n')
+  io.stderr:write('package.cpath: ' .. tostring(package.cpath) .. '\n')
+  if use_bundled then
+    io.stderr:write('Bundled native modules were enabled but not found.\n')
+  end
+  io.stderr:write(missing_native_instructions() .. '\n')
+  os.exit(1)
+end
+
+pcall(require, 'luarocks.loader')
+
+local function try_luarocks_path()
+  local lua_ver = _VERSION:match('Lua%s+([0-9]+%.[0-9]+)') or '5.1'
+  local ok, p = pcall(io.popen, 'luarocks path --lua-version=' .. lua_ver .. ' 2>/dev/null')
+  if not ok or not p then return end
+  local out = p:read('*a') or ''
+  p:close()
+  local lua_path = out:match("export%s+LUA_PATH='([^']*)'")
+  local lua_cpath = out:match("export%s+LUA_CPATH='([^']*)'")
+  if lua_path and lua_path ~= '' then
+    package.path = lua_path
+  end
+  if lua_cpath and lua_cpath ~= '' then
+    package.cpath = lua_cpath
+  end
+end
+
+if not pcall(require, 'socket.core') then
+  try_luarocks_path()
+end
+ensure_local_libs()
+
+require_native('socket.core')
+require_native('ssl.core')
 
 local json = require('json')
 local rsa = require('rsa')
 local websocket = require('websocket')
 local util = require('util')
 local lineedit = require('lineedit')
-
-local VERSION = 'EXAplusLua 0.1'
 
 local function stdin_is_tty()
   local rc = os.execute('test -t 0 2>/dev/null')

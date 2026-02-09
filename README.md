@@ -13,18 +13,19 @@ A minimal Lua-based console client for Exasol WebSocket API v5. This is a simpli
 
 ## Installation
 
-This repo ships a single script (`exaplus`) plus bundled Lua modules under `lib/` and `vendor/`.
+This repo ships a single script (`exaplus`) plus Lua modules under `lib/`.
+Native modules (LuaSocket/LuaSec) must be installed on the host.
 
-- Linux x86_64: you can run `./exaplus` directly (bundled LuaSocket/LuaSec binaries are included).
-- Other platforms: rebuild LuaSocket/LuaSec for your platform or use system packages and set `LUA_PATH`/`LUA_CPATH` accordingly.
+Static builds:
 
-The bundled native modules are convenience builds and are not produced by CI.
-If you need provenance or different platforms, rebuild them from upstream sources.
+- Linux: `tools/build_static_alpine.sh` -> `build/static/linux-<arch>/exaplus`
+- macOS (mostly static): `tools/build_static_darwin.sh` -> `build/static/darwin-<arch>/exaplus`
+- Optional source fetcher (offline builds): `tools/fetch_sources.sh` -> `build/sources/`
 
 ## Supported Platforms
 
-- Linux x86_64 with the bundled native LuaSocket/LuaSec modules.
-- Other platforms are untested and require rebuilding the native modules.
+- Any platform with Lua 5.1, LuaSocket, and LuaSec installed.
+- Static binaries can be built for Linux and macOS via the build scripts.
 
 ## Usage
 
@@ -83,7 +84,7 @@ History is saved to `~/.exaplus_history` (override with `EXAPLUS_HISTORY`).
 ## Notes
 
 - Password encryption uses a pure-Lua PKCS#1 v1.5 RSA implementation.
-- WebSocket transport uses embedded LuaSocket/LuaSec modules copied under `vendor/`.
+- WebSocket transport uses LuaSocket/LuaSec.
 - JSON messages are uncompressed.
 - Interactive mode includes in-memory history with Up/Down and Ctrl+R reverse search.
 - CREATE SCRIPT / UDF statements ignore semicolons inside the body until a line with only `/;` (or `/`) is seen.
@@ -93,7 +94,7 @@ History is saved to `~/.exaplus_history` (override with `EXAPLUS_HISTORY`).
 Tests require access to an Exasol instance:
 
 ```
-./tests/run_all.sh
+./tests/run_all.sh [--static /path/to/exaplus] [--host host] [--port port]
 ```
 
 ## Binary Distribution
@@ -108,7 +109,7 @@ text and any NOTICE file from the exact OpenSSL version used.
 - Not a full replacement for the full `exaplus` CLI; only the options listed above are supported.
 - Requires Exasol WebSocket API v5.
 - JSON messages are uncompressed.
-- Bundled native modules are Linux x86_64 only.
+- Requires host-installed native modules (or use the static binaries).
 
 ## License
 
