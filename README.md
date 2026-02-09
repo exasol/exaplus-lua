@@ -16,6 +16,9 @@ This repo ships a single script (`exaplus`) plus bundled Lua modules under `lib/
 - Linux x86_64: you can run `./exaplus` directly (bundled LuaSocket/LuaSec binaries are included).
 - Other platforms: rebuild LuaSocket/LuaSec for your platform or use system packages and set `LUA_PATH`/`LUA_CPATH` accordingly.
 
+The bundled native modules are convenience builds and are not produced by CI.
+If you need provenance or different platforms, rebuild them from upstream sources.
+
 ## Supported Platforms
 
 - Linux x86_64 with the bundled native LuaSocket/LuaSec modules.
@@ -30,6 +33,9 @@ This repo ships a single script (`exaplus`) plus bundled Lua modules under `lib/
 ./exaplus -c localhost/<fingerprint>:8563 -u sys -sql "SELECT 1;"
 ./exaplus -c n11,n12,n13/nocertcheck:8563 -u sys -p exasol
 ```
+
+Examples use the default `sys`/`exasol` credentials for a local instance; adjust
+for your environment.
 
 ### Connection string
 
