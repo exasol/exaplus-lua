@@ -16,5 +16,9 @@ jobs:
       - name: Lua syntax check
         run: |
           set -euo pipefail
-          find lib vendor tests -name '*.lua' -print0 | xargs -0 -n1 luac5.1 -p
+          dirs=(lib tests)
+          if [ -d vendor ]; then
+            dirs+=(vendor)
+          fi
+          find "${dirs[@]}" -name '*.lua' -print0 | xargs -0 -n1 luac5.1 -p
           lua5.1 -e "assert(loadfile('exaplus'))"
