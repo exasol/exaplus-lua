@@ -94,6 +94,13 @@ Tests require access to an Exasol instance:
 ./tests/run_all.sh
 ```
 
+## Binary Distribution
+
+If you distribute the static binary built by `tools/build_static_alpine.sh`,
+include third‑party notices and license texts (see `THIRD_PARTY_NOTICES.md`).
+The static build links OpenSSL, so be sure to include the Apache-2.0 license
+text and any NOTICE file from the exact OpenSSL version used.
+
 ## Limitations
 
 - Not a full replacement for the full `exaplus` CLI; only the options listed above are supported.
