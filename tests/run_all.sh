@@ -91,8 +91,8 @@ if [[ "$PORT" != "8563" ]]; then
 fi
 HOST_NC="$HOST/nocertcheck:$PORT"
 
-TMPDIR=$(mktemp -d)
-KH="$TMPDIR/known_hosts"
+PREP_TMPDIR=$(mktemp -d)
+KH="$PREP_TMPDIR/known_hosts"
 if EXAPLUS_KNOWN_HOSTS="$KH" EXAPLUS_TEST_QUIET=1 "$EXA" -q -u sys -P exasol -c "$HOST_NC" -sql "SELECT 1;" >/dev/null 2>&1; then
   if [[ -z "${EXAPLUS_TEST_FINGERPRINT:-}" && -s "$KH" ]]; then
     fp=$(awk -v hp="$HOSTPORT" '$1==hp {print $2; exit}' "$KH")
@@ -107,7 +107,7 @@ if EXAPLUS_KNOWN_HOSTS="$KH" EXAPLUS_TEST_QUIET=1 "$EXA" -q -u sys -P exasol -c 
     fi
   fi
 fi
-rm -rf "$TMPDIR"
+rm -rf "$PREP_TMPDIR"
 
 echo "RUN run.lua"
 EXAPLUS_TEST_QUIET=1 lua "$DIR/run.lua"

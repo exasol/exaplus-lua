@@ -80,7 +80,7 @@ if [ -z "${TARGET_ARCH:-}" ]; then
   esac
 fi
 export TARGET_ARCH
-OUTDIR="$ROOT/build/static/$TARGET_ARCH"
+OUTDIR="$ROOT/build/static/linux-$TARGET_ARCH"
 BUILD="$OUTDIR/.work"
 SRC="$BUILD/src"
 OBJ="$BUILD/obj"
