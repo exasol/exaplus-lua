@@ -3,11 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="alpine:3.19"
+PODMAN_OPTS=()
 
-if command -v podman >/dev/null 2>&1; then
+podman_ok() { command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; }
+docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+
+if podman_ok; then
   RUNTIME="podman"
   RUN_ID="$$"
-  PODMAN_OPTS=()
   podman_has_opt() { podman --help 2>&1 | grep -q -- "$1"; }
   if podman_has_opt --root; then
     PODMAN_OPTS+=(--root "/tmp/podman-root-$RUN_ID")
@@ -30,20 +33,53 @@ if command -v podman >/dev/null 2>&1; then
   export XDG_RUNTIME_DIR="/tmp/podman-runtime"
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 700 "$XDG_RUNTIME_DIR"
-elif command -v docker >/dev/null 2>&1; then
+elif docker_ok; then
   RUNTIME="docker"
 else
-  echo "Neither podman nor docker found" >&2
+  if command -v podman >/dev/null 2>&1; then
+    echo "Podman is installed but not running." >&2
+    echo "Start Podman with: podman machine init && podman machine start" >&2
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    echo "Docker is installed but not running." >&2
+    echo "Start Docker Desktop (or your Docker daemon) and retry." >&2
+  fi
+  if ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+    echo "Neither podman nor docker found" >&2
+  fi
   exit 1
 fi
 
-exec "$RUNTIME" "${PODMAN_OPTS[@]:-}" run --rm -i -v "$ROOT_DIR:/work" -w /work "$IMAGE" /bin/sh -s <<'INNER'
+RUN_OPTS=(-i)
+if [ "$RUNTIME" = "podman" ]; then
+  if podman run --help 2>&1 | grep -q -- "--rm"; then
+    RUN_OPTS=(--rm "${RUN_OPTS[@]}")
+  fi
+else
+  RUN_OPTS=(--rm "${RUN_OPTS[@]}")
+fi
+
+CMD=("$RUNTIME")
+if [ "${#PODMAN_OPTS[@]}" -gt 0 ]; then
+  CMD+=("${PODMAN_OPTS[@]}")
+fi
+CMD+=(run "${RUN_OPTS[@]}" -v "$ROOT_DIR:/work" -w /work "$IMAGE" /bin/sh -s)
+exec "${CMD[@]}" <<'INNER'
 set -eu
 
 apk add --no-cache build-base curl tar python3 lua5.1-dev lua5.1 openssl-dev openssl-libs-static pkgconf
 
 ROOT="/work"
-export TARGET_ARCH="${TARGET_ARCH:-x86}"
+if [ -z "${TARGET_ARCH:-}" ]; then
+  case "$(uname -m)" in
+    x86_64|amd64) TARGET_ARCH="x86_64" ;;
+    i386|i686) TARGET_ARCH="x86" ;;
+    aarch64|arm64) TARGET_ARCH="aarch64" ;;
+    armv7l) TARGET_ARCH="armv7l" ;;
+    *) TARGET_ARCH="$(uname -m)" ;;
+  esac
+fi
+export TARGET_ARCH
 OUTDIR="$ROOT/build/static/$TARGET_ARCH"
 BUILD="$OUTDIR/.work"
 SRC="$BUILD/src"

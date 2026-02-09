@@ -16,10 +16,16 @@ local function script_dir()
 end
 
 local exaplus = os.getenv('EXAPLUS_BIN') or (script_dir() .. '../exaplus')
+local host = os.getenv('EXAPLUS_TEST_HOST') or 'localhost'
+local port = os.getenv('EXAPLUS_TEST_PORT') or '8563'
 local default_fp = '9aefaa1987a5a191d6e23c714a480b461c5e3462e0a98ffb6683edb10fa99400'
 local fp = os.getenv('EXAPLUS_TEST_FINGERPRINT') or default_fp
-local conn = 'localhost/' .. fp .. ':8563'
+local conn = host .. '/' .. fp .. ':' .. port
 local kh = '/tmp/exaplus_known_hosts_test_' .. tostring(os.time())
+
+local function escape_lua_pattern(s)
+  return (s:gsub('([%%%^%$%(%)%.%[%]%*%+%-%?])', '%%%1'))
+end
 
 local function assert_true(cond, msg)
   if not cond then error(msg or 'assertion failed') end
@@ -36,11 +42,12 @@ local f = io.open(kh, 'r')
 assert_true(f ~= nil, 'known_hosts file not created')
 local contents = f:read('*a')
 f:close()
-assert_true(contents:match('localhost:8563%s+%x+'), 'known_hosts entry missing')
+local hp_pat = escape_lua_pattern(host .. ':' .. port) .. '%s+%x+'
+assert_true(contents:match(hp_pat), 'known_hosts entry missing')
 
 -- Test 3: mismatch detection
 local bad = io.open(kh, 'w')
-bad:write('localhost:8563 deadbeef\n')
+bad:write(host .. ':' .. port .. ' deadbeef\n')
 bad:close()
 rc, out = run(cmd)
 assert_true(rc ~= 0, 'expected failure on mismatched fingerprint')

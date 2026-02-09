@@ -2,7 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXA="$ROOT_DIR/exaplus"
+EXA="${EXAPLUS_BIN:-$ROOT_DIR/exaplus}"
+HOST="${EXAPLUS_TEST_HOST:-localhost}"
+PORT="${EXAPLUS_TEST_PORT:-8563}"
+HOSTPORT="$HOST:$PORT"
+CONN_HOST="$HOST"
+if [[ "$PORT" != "8563" ]]; then
+  CONN_HOST="$HOSTPORT"
+fi
+HOST_NC="$HOST/nocertcheck:$PORT"
+HOSTPORT_NC="$HOST:$PORT/nocertcheck"
 TMPDIR=$(mktemp -d)
 KH="$TMPDIR/known_hosts"
 HIST="$TMPDIR/history"
@@ -13,7 +22,7 @@ run() {
 }
 
 # ensure known_hosts
-run "$EXA" -q -u sys -P exasol -c localhost/nocertcheck:8563 -sql "SELECT 1;" >/dev/null
+run "$EXA" -q -u sys -P exasol -c "$HOST_NC" -sql "SELECT 1;" >/dev/null
 
 ts=$(date +%s)
 s1="EXAPLUS_SCRIPT_${ts}"
@@ -44,7 +53,7 @@ DROP SCRIPT $s2;
 DROP SCRIPT $s1;
 SQL
 
-out=$(run "$EXA" -q -u sys -P exasol -c localhost -f "$SQLFILE")
+out=$(run "$EXA" -q -u sys -P exasol -c "$CONN_HOST" -f "$SQLFILE")
 echo "$out" | grep -Eq "row(s)? in resultset"
 echo "$out" | grep -q "Rows affected"
 

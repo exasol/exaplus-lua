@@ -1,10 +1,24 @@
 #!/usr/bin/expect -f
 set timeout 10
-set exa "[file normalize [file join [file dirname [info script]] .. exaplus]]"
+set host "localhost"
+if {[info exists env(EXAPLUS_TEST_HOST)] && $env(EXAPLUS_TEST_HOST) ne ""} {
+  set host $env(EXAPLUS_TEST_HOST)
+}
+set port "8563"
+if {[info exists env(EXAPLUS_TEST_PORT)] && $env(EXAPLUS_TEST_PORT) ne ""} {
+  set port $env(EXAPLUS_TEST_PORT)
+}
+if {[info exists env(EXAPLUS_BIN)] && $env(EXAPLUS_BIN) ne ""} {
+  set exa $env(EXAPLUS_BIN)
+} else {
+  set exa "[file normalize [file join [file dirname [info script]] .. exaplus]]"
+}
 set env(EXAPLUS_KNOWN_HOSTS) "/tmp/exaplus_known_hosts_expect"
 set env(EXAPLUS_HISTORY) "/tmp/exaplus_history_expect"
 
-spawn $exa -u sys -P exasol -c localhost/nocertcheck:8563
+set conn "$host/nocertcheck:$port"
+
+spawn $exa -u sys -P exasol -c $conn
 expect {
   -re "SQL_EXA>" {}
   timeout { exit 1 }
