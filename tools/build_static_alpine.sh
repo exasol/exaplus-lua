@@ -7,14 +7,26 @@ IMAGE="alpine:3.19"
 if command -v podman >/dev/null 2>&1; then
   RUNTIME="podman"
   RUN_ID="$$"
-  PODMAN_OPTS=(
-    --root "/tmp/podman-root-$RUN_ID"
-    --runroot "/tmp/podman-runroot-$RUN_ID"
-    --tmpdir "/tmp/podman-tmp-$RUN_ID"
-    --storage-driver=vfs
-    --events-backend=file
-    --cgroup-manager=cgroupfs
-  )
+  PODMAN_OPTS=()
+  podman_has_opt() { podman --help 2>&1 | grep -q -- "$1"; }
+  if podman_has_opt --root; then
+    PODMAN_OPTS+=(--root "/tmp/podman-root-$RUN_ID")
+  fi
+  if podman_has_opt --runroot; then
+    PODMAN_OPTS+=(--runroot "/tmp/podman-runroot-$RUN_ID")
+  fi
+  if podman_has_opt --tmpdir; then
+    PODMAN_OPTS+=(--tmpdir "/tmp/podman-tmp-$RUN_ID")
+  fi
+  if podman_has_opt --storage-driver; then
+    PODMAN_OPTS+=(--storage-driver=vfs)
+  fi
+  if podman_has_opt --events-backend; then
+    PODMAN_OPTS+=(--events-backend=file)
+  fi
+  if podman_has_opt --cgroup-manager; then
+    PODMAN_OPTS+=(--cgroup-manager=cgroupfs)
+  fi
   export XDG_RUNTIME_DIR="/tmp/podman-runtime"
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 700 "$XDG_RUNTIME_DIR"
