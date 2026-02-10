@@ -1,6 +1,6 @@
 #!/usr/bin/env lua
 
-local VERSION = 'EXAplusLua 0.2'
+local VERSION = 'EXAplusLua 0.3'
 
 local root = debug.getinfo(1, 'S').source:match('@(.*/)') or './'
 local use_bundled = os.getenv('EXAPLUS_USE_BUNDLED') == '1'
@@ -527,7 +527,7 @@ local function print_result_set(rs, fetch_fn, fetch_kb)
       for c=1,#cols do
         local col = data[c] or {}
         local v = col[r]
-        if v == nil then v = 'NULL' end
+        if v == nil or v == json.null then v = 'NULL' end
         local s = tostring(v)
         row[c] = s
         if total_rows < max_sample and #s > widths[c] then widths[c] = #s end

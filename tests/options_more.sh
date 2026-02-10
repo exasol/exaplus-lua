@@ -84,6 +84,13 @@ run "$EXA" -q -u sys -P exasol -c "$HOST/$FP:$PORT" -sql "SELECT 1;" >/dev/null
 out=$(run "$EXA" -q -u sys -P exasol -c "$CONN_HOST" -F 1 -sql "SELECT COLUMN_NAME FROM EXA_ALL_COLUMNS LIMIT 101;")
 echo "$out" | grep -Eq "row(s)? in resultset"
 
+# 8) preserve NULL positions in result arrays
+out=$(run "$EXA" -q -u sys -P exasol -c "$CONN_HOST" -sql "SELECT 1 AS ID, 'A' AS V UNION ALL SELECT 2, NULL UNION ALL SELECT 3, 'C';")
+r2=$(echo "$out" | awk -F'|' '/\| 2 / {gsub(/^ +| +$/, "", $3); print $3; exit}')
+r3=$(echo "$out" | awk -F'|' '/\| 3 / {gsub(/^ +| +$/, "", $3); print $3; exit}')
+[[ "$r2" == "NULL" ]]
+[[ "$r3" == "C" ]]
+
 if [[ -z "${EXAPLUS_TEST_QUIET:-}" ]]; then
   echo "OK"
 fi

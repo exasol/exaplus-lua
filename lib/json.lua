@@ -1,4 +1,5 @@
 local json = {}
+json.null = {}
 
 local function escape_str(s)
   local repl = {
@@ -28,6 +29,9 @@ local function is_array(t)
 end
 
 local function encode_value(v)
+  if v == json.null then
+    return 'null'
+  end
   local tv = type(v)
   if tv == 'nil' then
     return 'null'
@@ -150,9 +154,15 @@ local function parse_array(str, idx)
     return res, idx + 1
   end
   while true do
-    local val
-    val, idx = parse_value(str, idx)
-    res[#res+1] = val
+    -- Keep nulls in arrays to preserve positional semantics.
+    if str:byte(idx) == 110 and str:sub(idx, idx+3) == 'null' then
+      res[#res+1] = json.null
+      idx = idx + 4
+    else
+      local val
+      val, idx = parse_value(str, idx)
+      res[#res+1] = val
+    end
     idx = skip_ws(str, idx)
     local c = str:byte(idx)
     if c == 93 then
